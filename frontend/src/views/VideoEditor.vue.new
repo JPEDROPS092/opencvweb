@@ -1,0 +1,529 @@
+<template>
+  <div>
+    <v-container fluid v-if="loading" class="d-flex justify-center align-center" style="min-height: 400px;">
+      <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
+    </v-container>
+    
+    <v-container fluid v-else-if="error">
+      <v-alert type="error" class="mb-4">
+        {{ error }}
+      </v-alert>
+      <v-btn color="primary" to="/" prepend-icon="mdi-home">Voltar para Home</v-btn>
+    </v-container>
+    
+    <v-container fluid v-else-if="!currentFile">
+      <v-alert type="warning" class="mb-4">
+        Vídeo não encontrado
+      </v-alert>
+      <v-btn color="primary" to="/" prepend-icon="mdi-home">Voltar para Home</v-btn>
+    </v-container>
+    
+    <div v-else>
+      <v-card class="mb-4">
+        <v-toolbar color="primary" dark>
+          <v-btn icon @click="$router.push('/gallery')">
+            <v-icon>mdi-arrow-left</v-icon>
+          </v-btn>
+          <v-toolbar-title>Editor de Vídeo: {{ getFileName(currentFile.original_file) }}</v-toolbar-title>
+          <v-spacer></v-spacer>
+          <v-btn icon @click="resetVideo" title="Restaurar Original">
+            <v-icon>mdi-refresh</v-icon>
+          </v-btn>
+          <v-btn icon @click="downloadVideo" title="Baixar Vídeo">
+            <v-icon>mdi-download</v-icon>
+          </v-btn>
+        </v-toolbar>
+        
+        <v-row class="ma-0">
+          <v-col cols="12" md="8" class="pa-0">
+            <v-card flat class="video-editor-panel">
+              <v-card-text class="text-center position-relative">
+                <div class="video-wrapper">
+                  <video 
+                    ref="videoElement" 
+                    controls 
+                    :src="getVideoUrl(currentFile.processed_file || currentFile.original_file)"
+                    @loadedmetadata="onVideoLoaded"
+                    class="main-video"
+                  ></video>
+                </div>
+                
+                <v-slider
+                  v-model="currentTime"
+                  :max="videoDuration"
+                  :min="0"
+                  step="0.1"
+                  hide-details
+                  class="mt-4"
+                  @change="seekToTime"
+                  color="primary"
+                >
+                  <template v-slot:prepend>
+                    <v-btn icon @click="togglePlay" size="small">
+                      <v-icon>{{ isPlaying ? 'mdi-pause' : 'mdi-play' }}</v-icon>
+                    </v-btn>
+                  </template>
+                  <template v-slot:append>
+                    <div class="time-display">{{ formatTime(currentTime) }} / {{ formatTime(videoDuration) }}</div>
+                  </template>
+                </v-slider>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          
+          <v-col cols="12" md="4" class="pa-0">
+            <v-card flat class="controls-panel" height="100%">
+              <v-tabs v-model="activeTab" bg-color="primary" align-tabs="center">
+                <v-tab value="filters">Filtros</v-tab>
+                <v-tab value="segments">Segmentos</v-tab>
+                <v-tab value="info">Info</v-tab>
+              </v-tabs>
+              
+              <v-window v-model="activeTab">
+                <!-- Aba de Filtros -->
+                <v-window-item value="filters">
+                  <v-card-text>
+                    <v-row>
+                      <v-col cols="6" v-for="(filter, index) in availableFilters" :key="index">
+                        <v-btn 
+                          block 
+                          :color="activeFilter === filter.value ? 'primary' : undefined"
+                          @click="applyFilter(filter.value)"
+                          class="text-none mb-2"
+                          :prepend-icon="filter.icon"
+                        >
+                          {{ filter.name }}
+                        </v-btn>
+                      </v-col>
+                    </v-row>
+                    
+                    <v-divider class="my-4"></v-divider>
+                    
+                    <v-btn 
+                      block 
+                      color="secondary" 
+                      @click="resetVideo"
+                      prepend-icon="mdi-refresh"
+                      class="mt-2"
+                    >
+                      Restaurar Original
+                    </v-btn>
+                  </v-card-text>
+                </v-window-item>
+                
+                <!-- Aba de Segmentos -->
+                <v-window-item value="segments">
+                  <v-card-text>
+                    <v-alert type="info" variant="tonal" class="mb-4">
+                      Defina os tempos inicial e final para criar um segmento do vídeo.
+                    </v-alert>
+                    
+                    <v-row>
+                      <v-col cols="12">
+                        <v-text-field
+                          v-model="startTime"
+                          label="Tempo Inicial (s)"
+                          type="number"
+                          :min="0"
+                          :max="videoDuration"
+                          step="0.1"
+                          hide-details
+                          class="mb-2"
+                          density="compact"
+                        ></v-text-field>
+                        
+                        <v-btn 
+                          block 
+                          variant="outlined" 
+                          @click="setCurrentTimeAsStart"
+                          class="mb-4"
+                          prepend-icon="mdi-clock-start"
+                        >
+                          Usar Tempo Atual
+                        </v-btn>
+                      </v-col>
+                      
+                      <v-col cols="12">
+                        <v-text-field
+                          v-model="endTime"
+                          label="Tempo Final (s)"
+                          type="number"
+                          :min="startTime"
+                          :max="videoDuration"
+                          step="0.1"
+                          hide-details
+                          class="mb-2"
+                          density="compact"
+                        ></v-text-field>
+                        
+                        <v-btn 
+                          block 
+                          variant="outlined" 
+                          @click="setCurrentTimeAsEnd"
+                          class="mb-4"
+                          prepend-icon="mdi-clock-end"
+                        >
+                          Usar Tempo Atual
+                        </v-btn>
+                      </v-col>
+                    </v-row>
+                    
+                    <v-btn 
+                      block 
+                      color="primary" 
+                      :disabled="!canCreateSegment"
+                      @click="createSegment"
+                      prepend-icon="mdi-content-cut"
+                      class="mb-4"
+                    >
+                      Criar Segmento
+                    </v-btn>
+                    
+                    <v-divider class="my-4" v-if="currentFile.segments && currentFile.segments.length > 0"></v-divider>
+                    
+                    <div v-if="currentFile.segments && currentFile.segments.length > 0">
+                      <h3 class="text-h6 mb-3">Segmentos Criados</h3>
+                      
+                      <v-card 
+                        v-for="segment in currentFile.segments" 
+                        :key="segment.id" 
+                        class="mb-4"
+                        variant="outlined"
+                      >
+                        <v-card-title class="text-subtitle-1">
+                          {{ formatTime(segment.start_time) }} - {{ formatTime(segment.end_time) }}
+                        </v-card-title>
+                        
+                        <v-card-text class="pa-0">
+                          <video 
+                            controls 
+                            :src="getVideoUrl(segment.segment_file)"
+                            width="100%"
+                            height="150"
+                            preload="metadata"
+                          ></video>
+                        </v-card-text>
+                        
+                        <v-card-actions>
+                          <v-btn 
+                            variant="text" 
+                            density="compact" 
+                            icon="mdi-download" 
+                            @click="downloadSegment(segment)"
+                          ></v-btn>
+                          <v-spacer></v-spacer>
+                          <v-btn 
+                            variant="text" 
+                            density="compact" 
+                            icon="mdi-play" 
+                            @click="playSegment(segment)"
+                          ></v-btn>
+                        </v-card-actions>
+                      </v-card>
+                    </div>
+                  </v-card-text>
+                </v-window-item>
+                
+                <!-- Aba de Informações -->
+                <v-window-item value="info">
+                  <v-card-text>
+                    <h3 class="text-h6 mb-3">Informações do Vídeo</h3>
+                    
+                    <v-list>
+                      <v-list-item>
+                        <v-list-item-title>Nome do Arquivo</v-list-item-title>
+                        <v-list-item-subtitle>{{ getFileName(currentFile.original_file) }}</v-list-item-subtitle>
+                      </v-list-item>
+                      
+                      <v-list-item>
+                        <v-list-item-title>Data de Upload</v-list-item-title>
+                        <v-list-item-subtitle>{{ formatDate(currentFile.created_at) }}</v-list-item-subtitle>
+                      </v-list-item>
+                      
+                      <v-list-item>
+                        <v-list-item-title>Duração</v-list-item-title>
+                        <v-list-item-subtitle>{{ formatTime(videoDuration) }}</v-list-item-subtitle>
+                      </v-list-item>
+                      
+                      <v-list-item>
+                        <v-list-item-title>Segmentos Criados</v-list-item-title>
+                        <v-list-item-subtitle>{{ currentFile.segments ? currentFile.segments.length : 0 }}</v-list-item-subtitle>
+                      </v-list-item>
+                    </v-list>
+                  </v-card-text>
+                </v-window-item>
+              </v-window>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-card>
+    </div>
+    
+    <!-- Diálogo para visualizar segmento em tela cheia -->
+    <v-dialog v-model="segmentDialog.show" max-width="800">
+      <v-card>
+        <v-card-title class="text-h5">
+          Segmento: {{ formatTime(segmentDialog.startTime) }} - {{ formatTime(segmentDialog.endTime) }}
+          <v-spacer></v-spacer>
+          <v-btn icon @click="segmentDialog.show = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        
+        <v-card-text class="text-center">
+          <video 
+            controls 
+            :src="segmentDialog.url" 
+            width="100%"
+            autoplay
+          ></video>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+
+export default {
+  name: 'VideoEditor',
+  data() {
+    return {
+      currentFile: null,
+      loading: true,
+      error: null,
+      videoDuration: 0,
+      startTime: 0,
+      endTime: 0,
+      currentTime: 0,
+      isPlaying: false,
+      activeTab: 'filters',
+      activeFilter: null,
+      segmentDialog: {
+        show: false,
+        url: '',
+        startTime: 0,
+        endTime: 0
+      },
+      availableFilters: [
+        { name: 'Blur', value: 'blur', icon: 'mdi-blur' },
+        { name: 'Sharpen', value: 'sharpen', icon: 'mdi-image-filter-center-focus' },
+        { name: 'Emboss', value: 'emboss', icon: 'mdi-image-filter-vintage' },
+        { name: 'Laplacian', value: 'laplacian', icon: 'mdi-image-filter-drama' },
+        { name: 'Canny', value: 'canny', icon: 'mdi-image-filter-frames' },
+        { name: 'Sobel', value: 'sobel', icon: 'mdi-image-filter-hdr' },
+        { name: 'Escala de Cinza', value: 'grayscale', icon: 'mdi-image-filter-black-white' },
+        { name: 'Binarização', value: 'binary', icon: 'mdi-contrast-box' },
+        { name: 'Detectar Objetos', value: 'detect_objects', icon: 'mdi-magnify-scan' }
+      ],
+      videoUpdateInterval: null
+    };
+  },
+  computed: {
+    canCreateSegment() {
+      return this.startTime < this.endTime && this.endTime <= this.videoDuration;
+    }
+  },
+  mounted() {
+    this.fetchFileData();
+  },
+  beforeUnmount() {
+    if (this.videoUpdateInterval) {
+      clearInterval(this.videoUpdateInterval);
+    }
+  },
+  methods: {
+    async fetchFileData() {
+      try {
+        this.loading = true;
+        const response = await axios.get(`/api/files/${this.$route.params.id}/`);
+        this.currentFile = response.data;
+        this.loading = false;
+        
+        // Iniciar o intervalo para atualizar o tempo atual do vídeo
+        this.$nextTick(() => {
+          this.setupVideoTimeUpdate();
+        });
+      } catch (error) {
+        console.error('Error fetching file data:', error);
+        this.error = 'Erro ao carregar os dados do vídeo';
+        this.loading = false;
+      }
+    },
+    setupVideoTimeUpdate() {
+      if (this.videoUpdateInterval) {
+        clearInterval(this.videoUpdateInterval);
+      }
+      
+      this.videoUpdateInterval = setInterval(() => {
+        if (this.$refs.videoElement && !this.$refs.videoElement.paused) {
+          this.currentTime = this.$refs.videoElement.currentTime;
+          this.isPlaying = true;
+        } else {
+          this.isPlaying = false;
+        }
+      }, 100);
+    },
+    getFileName(path) {
+      if (!path) return '';
+      return path.split('/').pop();
+    },
+    getVideoUrl(path) {
+      if (!path) return '';
+      return `${process.env.VUE_APP_API_URL}${path}`;
+    },
+    formatDate(dateString) {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      return new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(date);
+    },
+    formatTime(seconds) {
+      if (!seconds && seconds !== 0) return '00:00';
+      
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    },
+    onVideoLoaded() {
+      const video = this.$refs.videoElement;
+      this.videoDuration = video.duration;
+      this.endTime = this.videoDuration;
+    },
+    togglePlay() {
+      const video = this.$refs.videoElement;
+      if (video.paused) {
+        video.play();
+      } else {
+        video.pause();
+      }
+    },
+    seekToTime() {
+      const video = this.$refs.videoElement;
+      if (video) {
+        video.currentTime = this.currentTime;
+      }
+    },
+    setCurrentTimeAsStart() {
+      const video = this.$refs.videoElement;
+      this.startTime = video.currentTime;
+      if (this.startTime >= this.endTime) {
+        this.endTime = Math.min(this.startTime + 1, this.videoDuration);
+      }
+    },
+    setCurrentTimeAsEnd() {
+      const video = this.$refs.videoElement;
+      this.endTime = video.currentTime;
+      if (this.endTime <= this.startTime) {
+        this.startTime = Math.max(0, this.endTime - 1);
+      }
+    },
+    async applyFilter(filterType) {
+      try {
+        this.loading = true;
+        this.activeFilter = filterType;
+        const response = await axios.post(
+          `/api/files/${this.currentFile.id}/apply_filter/${filterType}/`
+        );
+        this.currentFile = response.data;
+        this.loading = false;
+      } catch (error) {
+        console.error('Error applying filter:', error);
+        this.error = 'Erro ao aplicar o filtro';
+        this.loading = false;
+      }
+    },
+    async resetVideo() {
+      try {
+        this.loading = true;
+        this.activeFilter = null;
+        const response = await axios.post(
+          `/api/files/${this.currentFile.id}/reset/`
+        );
+        this.currentFile = response.data;
+        this.loading = false;
+      } catch (error) {
+        console.error('Error resetting video:', error);
+        this.error = 'Erro ao restaurar o vídeo original';
+        this.loading = false;
+      }
+    },
+    async createSegment() {
+      if (!this.canCreateSegment) return;
+      
+      try {
+        this.loading = true;
+        const response = await axios.post(
+          `/api/files/${this.currentFile.id}/create_video_segment/`,
+          { start_time: this.startTime, end_time: this.endTime }
+        );
+        
+        this.currentFile = response.data;
+        this.loading = false;
+        this.activeTab = 'segments';
+      } catch (error) {
+        console.error('Error creating segment:', error);
+        this.error = 'Erro ao criar o segmento de vídeo';
+        this.loading = false;
+      }
+    },
+    playSegment(segment) {
+      this.segmentDialog.url = this.getVideoUrl(segment.segment_file);
+      this.segmentDialog.startTime = segment.start_time;
+      this.segmentDialog.endTime = segment.end_time;
+      this.segmentDialog.show = true;
+    },
+    downloadVideo() {
+      const videoUrl = this.getVideoUrl(this.currentFile.processed_file || this.currentFile.original_file);
+      const link = document.createElement('a');
+      link.href = videoUrl;
+      link.download = this.getFileName(this.currentFile.original_file);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    downloadSegment(segment) {
+      const videoUrl = this.getVideoUrl(segment.segment_file);
+      const link = document.createElement('a');
+      link.href = videoUrl;
+      link.download = `Segment_${this.formatTime(segment.start_time)}_${this.formatTime(segment.end_time)}_${this.getFileName(this.currentFile.original_file)}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }
+};
+</script>
+
+<style scoped>
+.video-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.main-video {
+  max-width: 100%;
+  max-height: 60vh;
+}
+
+.controls-panel {
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  height: 100%;
+}
+
+.time-display {
+  min-width: 80px;
+  text-align: right;
+}
+
+.position-relative {
+  position: relative;
+}
+</style>
