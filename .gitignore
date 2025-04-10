@@ -63,7 +63,7 @@ backend/edteti_project/models/*
 # OpenCV and image processing
 *.jpg
 *.jpeg
-*.png
+
 *.gif
 *.bmp
 *.tif
