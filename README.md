@@ -6,6 +6,14 @@ Uma aplicação web moderna e intuitiva para processamento de imagens e vídeos 
 
 ### 🖼️ Processamento de Imagens
 
+![Logo do Projeto](1.png)
+---
+![Logo do Projeto](2.png)
+---
+![Logo do Projeto](3.png)
+---
+![Logo do Projeto](4.png)
+
 - 📤 Upload e gerenciamento de imagens
 - 🧩 Filtros avançados:
   - 🌫️ Blur (Desfoque)
