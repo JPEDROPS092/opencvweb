@@ -94,27 +94,31 @@ opencvweb/
 1. Clone o repositório e navegue até o diretório do backend:
 
    ```bash
+   https://github.com/JPEDROPS092/opencvweb
+   ```
+
+   ```bash
    cd opencvweb/backend
    ```
-2. Crie e ative um ambiente virtual:
+3. Crie e ative um ambiente virtual:
 
    ```bash
    python -m venv venv
    source venv/bin/activate  # No Windows: venv\Scripts\activate
    ```
-3. Instale as dependências:
+4. Instale as dependências:
 
    ```bash
    pip install -r requirements.txt
    ```
-4. Configure o banco de dados:
+5. Configure o banco de dados:
 
    ```bash
    cd edteti_project
    python manage.py makemigrations
    python manage.py migrate
    ```
-5. Inicie o servidor:
+6. Inicie o servidor:
 
    ```bash
    python manage.py runserver
